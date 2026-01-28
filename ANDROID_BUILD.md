@@ -144,6 +144,15 @@ rustflags = [
 CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "aarch64-linux-android33-clang"
 ```
 
+**Note**: If you're using a different Android API level (set in `$ANDROID_API`), update the `33` in both `linker` paths to match your API level. For example, for Android 11 (API 30):
+```toml
+linker = "aarch64-linux-android30-clang"
+```
+and
+```toml
+CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "aarch64-linux-android30-clang"
+```
+
 ---
 
 ## Cross-Compiling for Android
@@ -181,6 +190,9 @@ cd $SCX_ROOT
 # Set up environment for BPF compilation
 export BPF_CLANG=clang-17
 export BPF_CFLAGS="-g -O2 -Wall -Wno-compare-distinct-pointer-types -D__TARGET_ARCH_arm64 -mcpu=v3 -mlittle-endian"
+
+# Note: If your Android kernel has older BPF support (pre-5.13), you may need to use -mcpu=v2 instead of v3
+# export BPF_CFLAGS="-g -O2 -Wall -Wno-compare-distinct-pointer-types -D__TARGET_ARCH_arm64 -mcpu=v2 -mlittle-endian"
 
 # Build scx_lavd for Android
 cargo build \
@@ -235,7 +247,10 @@ CONFIG_KALLSYMS_ALL=y
 # Required on ARM64
 # CONFIG_DEBUG_INFO_REDUCED is not set
 
-# LAVD-specific: futex tracking support
+# LAVD-specific: futex tracking for lock holder preemption avoidance
+# LAVD tracks futex operations to provide additional time slices to futex holders,
+# improving system-wide progress by avoiding lock holder preemption.
+# This requires either ftrace (via FUNCTION_TRACER) or tracepoint support.
 CONFIG_FUNCTION_TRACER=y
 
 # Recommended for development/testing
@@ -448,6 +463,9 @@ su
 
 # Or with parameters
 /system/bin/scx_lavd --stats 5
+
+# To monitor statistics, use --monitor in a separate terminal
+# /system/bin/scx_lavd --monitor 5
 ```
 
 ### 5. Verify Scheduler is Running
@@ -457,8 +475,9 @@ su
 adb shell "cat /sys/kernel/sched_ext/state"
 # Should output: enabled
 
-adb shell "cat /sys/kernel/sched_ext/*/ops"
+adb shell 'cat /sys/kernel/sched_ext/*/ops'
 # Should output: lavd
+# (The wildcard * matches the scheduler ID directory)
 ```
 
 ### 6. Making it Persistent (Optional)
@@ -580,10 +599,12 @@ cargo build --release --target aarch64-linux-android --package scx_lavd \
 **Solution**:
 - Ensure you're running as root: `adb root`
 - Check SELinux status: `adb shell getenforce`
-- If enforcing, temporarily set permissive for testing:
+- If enforcing, temporarily set permissive **for testing only**:
   ```bash
   adb shell setenforce 0
   ```
+  
+  **⚠️ WARNING**: Setting SELinux to permissive mode is a **significant security risk** and should **NEVER** be used in production environments. This is only for testing purposes. For production deployments, you must create proper SELinux policies for the scx_lavd binary and BPF programs. Consult the [Android SELinux documentation](https://source.android.com/docs/security/features/selinux) for policy creation guidelines.
 
 #### 6. Scheduler loads but system becomes unstable
 
@@ -592,13 +613,13 @@ cargo build --release --target aarch64-linux-android --package scx_lavd \
 **Solution**:
 - Start with conservative settings
 - Use scx_lavd's autopilot mode
-- Monitor with: `scx_lavd --monitor 5`
-- Fall back to default scheduler: Kill the scx_lavd process or use sysrq
-
-```bash
-# Emergency: Switch back to default scheduler
-adb shell "echo S > /proc/sysrq-trigger"
-```
+- Monitor performance with `scx_lavd --monitor 5` (displays live statistics)
+- Or check statistics periodically with `scx_lavd --stats 5`
+- Fall back to default scheduler using one of these methods:
+  1. Kill the scx_lavd process: `adb shell killall scx_lavd`
+  2. Use sysrq to reset scheduler: `adb shell "echo S > /proc/sysrq-trigger"`
+  
+**Note**: `sysrq-S` is the sched_ext-specific SysRq key that switches the system back to the default scheduler. This is different from the standard Linux SysRq emergency sync command.
 
 #### 7. Cross-compilation linking errors
 
@@ -658,8 +679,11 @@ adb shell bpftool struct_ops list
 ### Performance Monitoring
 
 ```bash
-# Monitor scheduler statistics
+# Monitor scheduler statistics (live updates)
 adb shell "/system/bin/scx_lavd --monitor 5"
+
+# Check periodic statistics from the scheduler instance
+adb shell "/system/bin/scx_lavd --stats 5"
 
 # Check CPU utilization
 adb shell top
