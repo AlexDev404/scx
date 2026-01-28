@@ -1,5 +1,7 @@
 # Install Instructions by Distro
 
+For building on Android devices, see the [Android Build Guide](ANDROID_BUILD.md).
+
 ## Ubuntu
 
 #### Upgrading to 25.10 (Questing Quokka) - recommended
