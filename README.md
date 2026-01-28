@@ -95,6 +95,7 @@ are provided for select distros.
 - [Fedora](INSTALL.md#fedora)
 - [Nix](INSTALL.md#nix)
 - [openSUSE Tumbleweed](INSTALL.md#opensuse-tumbleweed)
+- [Android](ANDROID_BUILD.md) - Building for Android devices
 
 ## Repository Structure
 
